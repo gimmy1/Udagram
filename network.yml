@@ -1,0 +1,295 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description:
+  Infrastructure as Code using CloudFormation.
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resources
+    Type: String
+  
+  VpcCIDR:
+    Description: Please enter the IP range (CIDR notation) for this
+    Type: String
+    Default: 10.0.0.0/16
+  
+  PublicSubnet1CIDR:
+      Description: Please enter the IP range(CIDR notation) for this
+      Type: String
+      Default: 10.0.0.0/18
+    
+  PublicSubnet2CIDR:
+    Description: Please enter the IP range(CIDR notation) for this
+    Type: String
+    Default: 10.0.64.0/18
+  
+  PrivateSubnet1CIDR:
+    Description: Please enter the IP range(CIDR notation) for this
+    Type: String
+    Default: 10.0.128.0/18
+  
+  PrivateSubnet2CIDR:
+    Description: Please enter the IP range(CIDR notation) for this
+    Type: String
+    Default: 10.0.192.0/18
+
+  
+Resources:
+  # A Virtual Private Cloud is a virtual network dedicated to a AWS account.
+  # You can launch AWS resources: EC2. 
+  # VPC's have a range of IPv4 addresses for the VPC. in the form of a
+  # They are referred to as Classless Inter-Domain Routing (CIDR) block; for example, 10.0.0.0/16.
+  # This is the primary CIDR block for your VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Ref EnvironmentName
+    
+  # Gateway for connecting VPC to internet
+  # Provides a target in a VPC route tables for internet-routable traffic,
+  # and performs network address translation (NAT) for instances that have
+  # been assigned public IPv4 addresses
+  InternetGateway:
+      Type: AWS::EC2::InternetGateway
+      Properties:
+          Tags:
+              - Key: Name
+                Value: !Ref EnvironmentName
+
+  # Enables connectivity between the internet and the VPC.
+  # Attaches an internet gateway, or a virtual private gateway to a VPC.
+  InternetGatewayAttachment:
+      Type: AWS::EC2::VPCGatewayAttachment
+      Properties:
+          InternetGatewayId: !Ref InternetGateway
+          VpcId: !Ref VPC
+      
+  # A VPC spans all of the Availability Zones in the Region. After creating a VPC,
+  # you can add one or more subnets in each Availability Zone
+
+  # When you create a subnet, you specify the CIDR block for the subnet, which is a subset
+  # of the VPC CIDR block. Each subnet must reside entirely within one Availability Zone
+  # and cannot span zones
+
+  # An availability zone is a logical data center in a region available
+  # for use by any AWS customer. Each zone in a region has redundant 
+  # and separate power, networking and connectivity to reduce the likelihood 
+  # of two zones failing simultaneously. A common misconception 
+  # is that a single zone equals a single data center
+  
+  # Availability Zone
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs ''] 
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Subnet (AZ1)
+  
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC 
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Subnet (AZ1)
+  
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+    
+  # Enables instances in a private subnet to connect to the internet or other AWS services,
+  # but prevent the internet from initiating connections with the instances. A NAT device forwards
+  # traffic from the instances in the private subnet to the internet or other AWS services,
+  # and then sends the response back to the instances. When traffic goes to the internet, the source
+  # IPv4 address is replaced with the NAT device’s address and similarly, when the response traffic
+  # goes to those instances, the NAT device translates the address back to those instances’ private
+  # IPv4 addresses
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+  
+  
+  
+  # AVAILABILITY ZONE 2
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Subnet (AZ2)
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Subnet (AZ2)
+  
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+      SubnetId: !Ref PublicSubnet2
+    
+
+  # Routing for public routes 
+
+  # Route Table - Routing is the action of applying (routing) rules to your network, 
+  # in this case, to your VPC. A route table contains a set of rules. 
+  # It blocks traffic from resources that do not follow the routing rule. 
+  # It is represented as an AWS::EC2::RouteTable resource in CloudFormation terminology.
+  
+  # Rules - define (in a particular order of precedence) the network protocol, allowed IP addresses, 
+  # and ports to allow the inbound and outbound traffic separately. 
+  # A single rule is called an AWS::EC2::Route resource in CloudFormation terminology.
+
+  # Public Route Table - This route table will have a default rule (AWS::EC2::Route) to allow all outbound
+  # traffic routed to the internet gateway. 
+  # Next, we will attach this route table (AWS::EC2::SubnetRouteTableAssociation) to both our public subnets.
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: "Public Route Table"
+  
+  # The default public route: In the following example, when we use the wildcard address 0.0.0.0/0, 
+  # we are saying for any address that is destined for any IP address in the world, 
+  # send it to the referenced GatewayId
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  
+  # In order to associate subnets with our route table, 
+  # we will need to use a SubnetRouteTableAssociation resource using the following syntax:
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Routes (AZ1)
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Routes (AZ2)
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
+  
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2
+
+Outputs:
+  VPC:
+    Description: VPC reference
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${EnvironmentName}-VPCID
+
+  PublicSubnets:
+    Description: Public subnet IDs
+    Value: !Join [ ",", [ !Ref PublicSubnet1, !Ref PublicSubnet2 ]]
+    Export:
+      Name: !Sub ${EnvironmentName}-PublicSubnetIDs
+
+  PublicSubnet1CIDR:
+    Description: Public Subnet 1 CIDR
+    Value: !Ref PublicSubnet1CIDR
+    Export:
+      Name: !Sub ${EnvironmentName}-PublicSubnet1CIDR
+
+  PublicSubnet2CIDR:
+    Description: Public Subnet 2 CIDR
+    Value: !Ref PublicSubnet2CIDR
+    Export:
+      Name: !Sub ${EnvironmentName}-PublicSubnet2CIDR
+
+  PublicSubnet1ID:
+    Description: Public Subnet 1 ID
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: !Sub ${EnvironmentName}-PublicSubnet1ID
+
+  PublicSubnet2ID:
+    Description: Public Subnet 2 ID
+    Value: !Ref PublicSubnet2
+    Export:
+      Name: !Sub ${EnvironmentName}-PublicSubnet2ID
+
+  PrivateSubnets:
+    Description: Private subnet IDs
+    Value: !Join [ ",", [ !Ref PrivateSubnet1, !Ref PrivateSubnet2 ]]
+    Export:
+      Name: !Sub ${EnvironmentName}-PrivateSubnetIDs

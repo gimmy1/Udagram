@@ -1,0 +1,1 @@
+./delete-network.sh && ./delete-servers.sh
